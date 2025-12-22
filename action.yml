@@ -1,4 +1,4 @@
-name: Docker Publish Action
+name: Docker Publish Action Tool
 description: Build and publish Docker images to Docker Hub
 author: Sriman
 
