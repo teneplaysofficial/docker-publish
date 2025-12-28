@@ -46,7 +46,8 @@ inputs:
 runs:
   using: composite
   steps:
-    - shell: bash
+    - name: Validate inputs and prepare environment
+      shell: bash
       run: |
         set -eu
 
@@ -72,13 +73,15 @@ runs:
         username: ${{ inputs.docker_username }}
         password: ${{ inputs.docker_password }}
 
-    - shell: bash
+    - name: Log QEMU setup
+      shell: bash
       run: echo "::notice::Setting up QEMU for multi-architecture builds"
 
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
 
-    - shell: bash
+    - name: Log Buildx setup
+      shell: bash
       run: echo "::notice::Setting up Docker Buildx builder"
 
     - name: Set up Buildx
