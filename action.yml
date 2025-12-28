@@ -3,8 +3,8 @@ description: Build and publish Docker images to Docker Hub
 author: Sriman
 
 branding:
-  icon: cpu
-  color: gray-dark
+  icon: upload-cloud
+  color: blue
 
 inputs:
   context_path:
@@ -33,17 +33,53 @@ inputs:
     description: Application version (e.g. 1.2.3, 1.2.3-beta.2, 1.2.3-34)
     required: true
 
+  dry_run:
+    description: Build only, do not push images
+    required: false
+    default: "false"
+
+  summary:
+    description: Generate job summary
+    required: false
+    default: "true"
+
 runs:
   using: composite
   steps:
+    - shell: bash
+      run: |
+        set -eu
+
+        echo "::group::Docker authentication"
+
+        if [[ ! "${{ inputs.image_repo }}" =~ .+/.+ ]]; then
+          echo "::error::image_repo must be in the format <namespace>/<repository>"
+          exit 1
+        fi
+
+        if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+          echo "::warning::Dry-run mode enabled, images will NOT be pushed"
+        fi
+
+        echo "::notice::Using GitHub Actions cache for Docker build layers"
+        echo "::notice::Logging in to Docker Hub"
+
+        echo "::endgroup::"
+
     - name: Log in to Docker Hub
       uses: docker/login-action@v3
       with:
         username: ${{ inputs.docker_username }}
         password: ${{ inputs.docker_password }}
 
+    - shell: bash
+      run: echo "::notice::Setting up QEMU for multi-architecture builds"
+
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
+
+    - shell: bash
+      run: echo "::notice::Setting up Docker Buildx builder"
 
     - name: Set up Buildx
       uses: docker/setup-buildx-action@v3
@@ -52,34 +88,45 @@ runs:
       id: version
       shell: bash
       run: |
-        set -e
+        set -eu
+        echo "::group::Version parsing"
 
         RAW_VERSION="${{ inputs.version }}"
         VERSION="${RAW_VERSION#v}"
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+        echo "::notice::Raw version: $RAW_VERSION"
+        echo "::notice::Normalized version: $VERSION"
+
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
         if [[ "$VERSION" == *"-"* ]]; then
           PRERELEASE="${VERSION#*-}"
-          echo "prerelease=true" >> $GITHUB_OUTPUT
+          echo "prerelease=true" >> "$GITHUB_OUTPUT"
 
           if [[ "$PRERELEASE" =~ ^[0-9]+$ ]]; then
-            echo "kind=numeric" >> $GITHUB_OUTPUT
+            echo "kind=numeric" >> "$GITHUB_OUTPUT"
+            echo "::notice::Numeric prerelease detected → tag: next"
           else
             LABEL="${PRERELEASE%%.*}"
-            echo "kind=labeled" >> $GITHUB_OUTPUT
-            echo "label=$LABEL" >> $GITHUB_OUTPUT
+            echo "kind=labeled" >> "$GITHUB_OUTPUT"
+            echo "label=$LABEL" >> "$GITHUB_OUTPUT"
+            echo "::notice::Labeled prerelease detected → tag: $LABEL"
           fi
         else
-          echo "prerelease=false" >> $GITHUB_OUTPUT
-          echo "kind=stable" >> $GITHUB_OUTPUT
-          echo "major=${VERSION%%.*}" >> $GITHUB_OUTPUT
+          echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          echo "kind=stable" >> "$GITHUB_OUTPUT"
+          echo "major=${VERSION%%.*}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Stable release detected"
         fi
+
+        echo "::endgroup::"
 
     - name: Generate Docker tags
       id: docker_tags
       shell: bash
       run: |
-        set -e
+        set -eu
+        echo "::group::Docker tag generation"
 
         IMAGE="${{ inputs.image_repo }}"
         VERSION="${{ steps.version.outputs.version }}"
@@ -98,18 +145,65 @@ runs:
           echo "$IMAGE:${{ steps.version.outputs.label }}" >> tags.txt
         fi
 
-        echo "Generated Docker tags:"
+        echo "::notice::Generated Docker tags"
         cat tags.txt
 
-        echo "tags<<EOF" >> $GITHUB_OUTPUT
-        cat tags.txt >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
+        {
+          echo "tags<<EOF"
+          cat tags.txt
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "::endgroup::"
+
+    - name: Validate tag strategy (fail fast)
+      shell: bash
+      run: |
+        set -eu
+        echo "::group::Fail-fast validation"
+
+        KIND="${{ steps.version.outputs.kind }}"
+
+        if [[ "$KIND" != "stable" ]] && grep -q ":latest" tags.txt; then
+          echo "::error::Invalid tag strategy: prereleases must NOT publish 'latest'"
+          exit 1
+        fi
+
+        if [[ ! -s tags.txt ]]; then
+          echo "::error::No Docker tags were generated"
+          exit 1
+        fi
+
+        echo "::notice::Tag strategy validated"
+        echo "::endgroup::"
 
     - name: Build and push Docker image
       uses: docker/build-push-action@v6
       with:
         context: ${{ inputs.context_path }}
         file: ${{ inputs.dockerfile_path }}
-        push: true
+        push: ${{ inputs.dry_run != 'true' }}
         platforms: linux/amd64,linux/arm64
         tags: ${{ steps.docker_tags.outputs.tags }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Job summary
+      if: inputs.summary == 'true'
+      shell: bash
+      run: |
+        {
+          echo "## Docker Publish Summary"
+          echo ""
+          echo "**Image:** \`${{ inputs.image_repo }}\`"
+          echo "**Version:** \`${{ steps.version.outputs.version }}\`"
+          echo "**Strategy:** \`${{ steps.version.outputs.kind }}\`"
+          echo "**Mode:** $([[ '${{ inputs.dry_run }}' == 'true' ]] && echo 'dry-run' || echo 'publish')"
+          echo ""
+          echo "### Tags"
+          sed 's/^/- `/' tags.txt | sed 's/$/`/'
+          echo ""
+          echo "### Platforms"
+          echo "- linux/amd64"
+          echo "- linux/arm64"
+        } >> "$GITHUB_STEP_SUMMARY"
