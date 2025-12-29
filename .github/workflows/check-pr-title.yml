@@ -1,0 +1,14 @@
+name: Sheriff
+
+on:
+  pull_request:
+    types: [opened, edited]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  sheriff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: teneplaysofficial/sheriff@v4
