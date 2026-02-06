@@ -11,4 +11,4 @@ jobs:
   sheriff:
     runs-on: ubuntu-latest
     steps:
-      - uses: teneplaysofficial/sheriff@v4
+      - uses: teneplaysofficial/sheriff@v5
