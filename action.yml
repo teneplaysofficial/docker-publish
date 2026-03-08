@@ -85,7 +85,7 @@ runs:
       run: echo "::notice::Setting up Docker Buildx builder"
 
     - name: Set up Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
 
     - name: Parse version
       id: version
