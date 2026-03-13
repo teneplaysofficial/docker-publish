@@ -53,7 +53,7 @@ Build and publish Docker images to **Docker Hub** with a **safe, opinionated tag
 ## 🚀 Quick Start
 
 ```yaml
-- uses: teneplaysofficial/docker-publish@v1
+- uses: teneplaysofficial/docker-publish@v2
   with:
     image_repo: tenedev/release-hub
     version: v1.2.4
@@ -217,7 +217,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: teneplaysofficial/docker-publish@v1
+      - uses: teneplaysofficial/docker-publish@v2
         with:
           image_repo: tenedev/release-hub
           version: ${{ github.ref_name }}
