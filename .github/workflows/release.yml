@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version (e.g. 1.2.3, 1.2.3-beta.1)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Parse version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version: $VERSION"
+            exit 1
+          fi
+
+          FULL_TAG="v$VERSION"
+          MAJOR_TAG="v${VERSION%%.*}"
+
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE=true
+          else
+            PRERELEASE=false
+          fi
+
+          {
+            echo "version=$VERSION"
+            echo "full_tag=$FULL_TAG"
+            echo "major_tag=$MAJOR_TAG"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create full version tag
+        run: |
+          git tag "${{ steps.version.outputs.full_tag }}"
+          git push origin "${{ steps.version.outputs.full_tag }}"
+
+      - name: Update major tag
+        if: ${{ steps.version.outputs.prerelease == 'false' }}
+        run: |
+          git tag -f "${{ steps.version.outputs.major_tag }}"
+          git push origin "${{ steps.version.outputs.major_tag }}" --force
+
+      - name: Generate release notes
+        id: notes
+        shell: bash
+        run: |
+          PREV_TAG="$(git describe --tags --match 'v*.*.*' --abbrev=0 HEAD^ 2>/dev/null || true)"
+          CURRENT_TAG="${{ steps.version.outputs.full_tag }}"
+
+          {
+            echo "body<<EOF"
+            echo "## What's Changed"
+            echo
+
+            if [ -n "$PREV_TAG" ]; then
+              git log "${PREV_TAG}..HEAD" --pretty=format:"- %s"
+              echo
+              echo
+              echo "**Full Changelog:** https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${CURRENT_TAG}"
+            else
+              git log --pretty=format:"- %s"
+            fi
+
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
+        with:
+          tag_name: ${{ steps.version.outputs.full_tag }}
+          body: ${{ steps.notes.outputs.body }}
+          generate_release_notes: false
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.version.outputs.prerelease == 'false' }}
